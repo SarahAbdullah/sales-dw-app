@@ -458,4 +458,4 @@ def process_user_question(question: str):
 # Returns the list of predefined OLAP queries.
 # Used by the Streamlit app to display available queries.
 def get_predefined_queries():
-    return OLAP_QUERIESimport 
+    return OLAP_QUERIES
