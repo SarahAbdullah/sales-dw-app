@@ -1,7 +1,9 @@
 import base64
-import json
+import csv
+import io
 import pandas as pd
 import streamlit as st
+
 from dw_engine import (
     process_user_question,
     process_predefined_query,
@@ -9,15 +11,9 @@ from dw_engine import (
 )
 
 
-# =========================================================
-# 1- PAGE CONFIG
-# =========================================================
 st.set_page_config(page_title="Sales DW Assistant", layout="wide")
 
 
-# =========================================================
-# 2- CUSTOM STYLE
-# =========================================================
 st.markdown(
     """
     <style>
@@ -37,37 +33,7 @@ st.markdown(
         margin-bottom: 24px;
     }
 
-    /* =========================
-       ALL NORMAL BUTTONS
-    ========================= */
-    div.stButton > button {
-        background-color: #0F81BF !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 10px !important;
-        padding: 0.65rem 1rem !important;
-        font-weight: 600 !important;
-    }
-
-    div.stButton > button:hover {
-        background-color: #0c6fa3 !important;
-        color: white !important;
-        border: none !important;
-    }
-
-    div.stButton > button:focus,
-    div.stButton > button:focus-visible,
-    div.stButton > button:active {
-        background-color: #0F81BF !important;
-        color: white !important;
-        border: none !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-
-    /* =========================
-       DOWNLOAD BUTTONS
-    ========================= */
+    div.stButton > button,
     div.stDownloadButton > button {
         background-color: #0F81BF !important;
         color: white !important;
@@ -77,12 +43,16 @@ st.markdown(
         font-weight: 600 !important;
     }
 
+    div.stButton > button:hover,
     div.stDownloadButton > button:hover {
         background-color: #0c6fa3 !important;
         color: white !important;
         border: none !important;
     }
 
+    div.stButton > button:focus,
+    div.stButton > button:focus-visible,
+    div.stButton > button:active,
     div.stDownloadButton > button:focus,
     div.stDownloadButton > button:focus-visible,
     div.stDownloadButton > button:active {
@@ -93,9 +63,6 @@ st.markdown(
         box-shadow: none !important;
     }
 
-    /* =========================
-       REAL TABS STYLE
-    ========================= */
     div[data-baseweb="tab-list"] {
         justify-content: center !important;
         border-bottom: 1px solid #ddd !important;
@@ -128,7 +95,6 @@ st.markdown(
         margin: 0 !important;
     }
 
-    /* only one separator between the two tabs */
     button[data-baseweb="tab"]:first-child::after {
         content: "|" !important;
         position: absolute !important;
@@ -142,52 +108,20 @@ st.markdown(
         pointer-events: none !important;
     }
 
-    button[data-baseweb="tab"]:last-child::after {
-        content: "" !important;
-    }
-
-    button[data-baseweb="tab"]:hover {
-        color: #0F81BF !important;
-    }
-
-    button[data-baseweb="tab"]:hover p {
-        color: #0F81BF !important;
-    }
-
-    button[data-baseweb="tab"][aria-selected="true"] {
-        color: #0F81BF !important;
-        font-weight: 600 !important;
-    }
-
+    button[data-baseweb="tab"]:hover,
+    button[data-baseweb="tab"]:hover p,
+    button[data-baseweb="tab"][aria-selected="true"],
     button[data-baseweb="tab"][aria-selected="true"] p {
         color: #0F81BF !important;
         font-weight: 600 !important;
     }
 
-    button[data-baseweb="tab"]:focus,
-    button[data-baseweb="tab"]:focus-visible,
-    button[data-baseweb="tab"]:active {
-        background: transparent !important;
-        outline: none !important;
-        box-shadow: none !important;
-        color: #0F81BF !important;
-    }
-
-    button[data-baseweb="tab"]:focus p,
-    button[data-baseweb="tab"]:focus-visible p,
-    button[data-baseweb="tab"]:active p {
-        color: #0F81BF !important;
-    }
-
-    /* force the active underline to blue only */
     div[data-baseweb="tab-highlight"] {
         background-color: #0F81BF !important;
-        background: #0F81BF !important;
         height: 3px !important;
         border-radius: 3px 3px 0 0 !important;
     }
 
-    /* remove any possible red border/line on tab containers */
     div[data-baseweb="tab-border"] {
         background-color: transparent !important;
     }
@@ -197,39 +131,60 @@ st.markdown(
 )
 
 
-# =========================================================
-# 3- HELPERS
-# =========================================================
-
-# Reads an image file and converts it to base64 so it can be shown in HTML.
-# This is used to display the logo at the top of the page.
+# Reads the logo image and converts it to base64.
+# This allows the image to be displayed using HTML.
 def get_base64_image(path):
     with open(path, "rb") as img_file:
         return base64.b64encode(img_file.read()).decode()
 
 
-# Converts SQL result columns and rows into a pandas DataFrame.
-# This makes the result easier to display and download.
+# Converts query columns and rows into a Pandas DataFrame.
+# This is used to display the SQL result in Streamlit.
 def result_to_dataframe(columns, rows):
     return pd.DataFrame(rows, columns=columns)
 
 
-# Builds a JSON string from summary, insight, and recommendation.
-# This is used by the insights download button.
-def build_insights_json(result):
-    return json.dumps(
-        {
-            "summary": result["summary"],
-            "insight": result["insight"],
-            "recommendation": result["recommendation"]
-        },
-        indent=2,
-        ensure_ascii=False
-    )
+# Builds one CSV file that contains the query information,
+# query result, summary, insight, and recommendation.
+def build_combined_csv(result):
+    lines = []
+
+    lines.append(["Query Info"])
+    lines.append(["Title", result.get("title", "")])
+
+    if result.get("question", ""):
+        lines.append(["Question", result.get("question", "")])
+
+    lines.append(["SQL Query", result.get("sql_query", "")])
+    lines.append(["Currency Note", "All monetary values are in Saudi Riyal (SAR)."])
+    lines.append([])
+
+    lines.append(["Query Result"])
+
+    if result["columns"] and result["rows"]:
+        lines.append(result["columns"])
+
+        for row in result["rows"]:
+            lines.append(list(row))
+    else:
+        lines.append(["No data returned"])
+
+    lines.append([])
+
+    lines.append(["Generated Insights"])
+    lines.append(["Summary", result.get("summary", "")])
+    lines.append(["Insight", result.get("insight", "")])
+    lines.append(["Recommendation", result.get("recommendation", "")])
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerows(lines)
+
+    return output.getvalue().encode("utf-8-sig")
 
 
-# Displays the output in a clean layout with downloads.
-# It shows the question, SQL, result table, summary, insight, and recommendation.
+# Displays the SQL query, result table, and generated insights.
+# Also provides one CSV download containing both result and insights.
 def show_result(result, show_question=False):
     if show_question and "question" in result:
         st.subheader("User Question")
@@ -239,6 +194,8 @@ def show_result(result, show_question=False):
     st.code(result["sql_query"], language="sql")
 
     st.subheader("Query Result")
+    st.caption("All monetary values are in Saudi Riyal (SAR).")
+
     df = result_to_dataframe(result["columns"], result["rows"])
 
     if df.empty:
@@ -246,44 +203,32 @@ def show_result(result, show_question=False):
     else:
         st.dataframe(df, use_container_width=True)
 
-    st.subheader("Summary")
-    st.write(result["summary"] or "-")
+    st.subheader("Generated Insights")
 
-    st.subheader("Insight")
-    st.write(result["insight"] or "-")
+    st.markdown("**Summary**")
+    st.write(result.get("summary", "") or "-")
 
-    st.subheader("Recommendation")
-    st.write(result["recommendation"] or "-")
+    st.markdown("**Insight**")
+    st.write(result.get("insight", "") or "-")
 
-    col1, col2 = st.columns(2)
+    st.markdown("**Recommendation**")
+    st.write(result.get("recommendation", "") or "-")
 
-    with col1:
-        if not df.empty:
-            csv_data = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Download Result as CSV",
-                data=csv_data,
-                file_name="query_result.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key=f"csv_{result.get('title', result.get('question', 'result'))}"
-            )
+    csv_data = build_combined_csv(result)
 
-    with col2:
-        insights_json = build_insights_json(result)
-        st.download_button(
-            label="Download Insights as JSON",
-            data=insights_json,
-            file_name="insights.json",
-            mime="application/json",
-            use_container_width=True,
-            key=f"json_{result.get('title', result.get('question', 'result'))}"
-        )
+    file_name = result.get("title", result.get("question", "result"))
+    file_name = file_name.lower().replace(" ", "_").replace("/", "_")
+
+    st.download_button(
+        label="Download Result and Insights as CSV",
+        data=csv_data,
+        file_name=f"{file_name}_result_and_insights.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key=f"combined_{file_name}"
+    )
 
 
-# =========================================================
-# 4- LOGO + TITLE
-# =========================================================
 logo_path = "logo.png"
 
 try:
@@ -299,6 +244,7 @@ try:
 except Exception:
     pass
 
+
 st.markdown(
     "<h1 style='text-align: center; color:#0F81BF;'>Sales Data Warehouse Assistant</h1>",
     unsafe_allow_html=True
@@ -310,15 +256,9 @@ st.markdown(
 )
 
 
-# =========================================================
-# 5- TABS
-# =========================================================
 tab1, tab2 = st.tabs(["💬 Custom Question", "📊 Predefined Queries"])
 
 
-# =========================================================
-# 6- TAB 1
-# =========================================================
 with tab1:
     st.subheader("Ask a Custom Question")
 
@@ -338,9 +278,6 @@ with tab1:
                 st.error(f"Error: {str(e)}")
 
 
-# =========================================================
-# 7- TAB 2
-# =========================================================
 with tab2:
     st.subheader("Run a Predefined OLAP Query")
 
